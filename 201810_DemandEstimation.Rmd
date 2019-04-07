@@ -1,0 +1,214 @@
+---
+title: "Demand Estimation -- Economic Methods"
+author: "Maximilian Zebhauser"
+date: "17 10 2018"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+require(knitr)
+require(tidyverse)
+require(cowplot)
+require(memisc)
+require(pander)
+require(stargazer)
+knitr::opts_chunk$set(echo = TRUE)
+opts_chunk$set(dev = 'pdf')
+```
+
+```{r functions, include=FALSE}
+getdata <- function(file){
+    #returns the file specified with processed dates.
+    
+    #file si the pathof the file to be read
+    mydata <- read.csv(file, header = T)
+    
+    # create new object
+    mydata$date1 <- mydata$Date 
+    
+    # This overwrites the variable date1 and enters the first 7 digits of the string-variable date.
+    mydata$date1 <- substr(mydata$date, start = 1, stop = 7)
+    
+    # now we can convert it to the Date class, but first setting the locale
+    lct <- Sys.getlocale("LC_TIME"); Sys.setlocale("LC_TIME", "C")
+
+    mydata$date2 <- as.Date(mydata$date1, "%b%d%y")
+    # mydata$date2 <- ts(mydata$date2)
+    
+    mydata
+}
+
+createVariables <- function(mydata) {
+    #creates variables of interest for regression
+    
+    price <- mydata$Sales_USD/mydata$Sales_U #first 16 values are nonsensical
+    sales_u <-  mydata$Sales_U #first 16 values are nonsensical
+    ln_sales_u <- log(mydata$Sales_U) #first 16 values are nonsensical
+    ln_price <- log(price)#first 16 values are nonsensical
+    
+    df <- data.frame(price = price, sales_u = sales_u, ln_sales_u = ln_sales_u, ln_price = ln_price, date2 = mydata$date2)
+}
+
+runRegression <- function(vars.df) {
+    #runs regression on variables of interest
+    lm(vars.df$ln_sales_u ~ vars.df$ln_price)
+}
+
+merged.df <- function(data1, data2){
+    #removes ln_sales from data1 and merges with data2
+    
+    merge(data1[, -3], data2, by = "date2")
+}
+```
+
+```{r data loading, include=FALSE}
+hellman_at_jewel <- createVariables(getdata("Data/JWL_HL32.csv"))
+kraft_at_jewel <- createVariables(getdata("Data/JWL_KR32.csv"))
+hellman_at_central <- createVariables(getdata("Data/KC_HL32.csv"))
+kraft_at_central <- createVariables(getdata("Data/KC_KR32.csv"))
+```
+
+## Data Check
+
+1) If the generated turnover ($ Sales) of one week is divided by the units sold in the same period, we get hold of the average price per unit in this specific week. E.g. price per unit in the first week for Hellman Central: `r hellman_at_central[1:5,"price"]`.
+
+
+2) On Central level data is available for the whole timespan for Kraft and Hellman. In contrast on Jewel level the data misses the first 16 weeks. This could cause some troubles when it comes to comparison of the means. If we pretend this data missmatch would exist, the comparision for the mean prices on account and aggregated level is possible and interpretable. For example, it would be interesting to see if and how pricing policy differs on Jewel level compared to the Central level. Comparing the means we apply a t-test, which tells us that the means significantly differ in the case of Hellman but they do not differ in the case of Kraft. The p-values of the t-tests for Hellman and Kraft are 0.0007 and `r round(unname(unlist(t.test(kraft_at_central["price"], kraft_at_jewel["price"])["p.value"])),4)`. A look at the price distributions for both brands tells us that the prices are bimodal for Hellman und rather unimodal for Kraft (Central = red, Jewel = blue). But in general the means seem relatively close.
+
+
+```{r Means, echo=F, warning=F, fig.height=2.5, out.width = '70%', fig.align="center"}
+kable(matrix(c(mean(hellman_at_central$price), mean(hellman_at_jewel$price, na.rm = T), mean(kraft_at_central$price), mean(kraft_at_jewel$price, na.rm = T)),byrow = T, nrow = 2,ncol = 2, dimnames = list(c("Hellman", "Kraft"),c("Central", "Jewel"))), caption = "Means of prices")
+plot1 <- ggplot() + geom_density(data = hellman_at_central,aes(x= price), color = "red", fill ="red", alpha = .1) + geom_density(data = hellman_at_jewel,aes(x= price), color = "blue", fill ="blue", alpha = .2) + ggtitle("Distribution of prices - Hellman")+ geom_vline(xintercept = mean(hellman_at_central$price), color = "red") + geom_vline(xintercept = mean(hellman_at_jewel$price, na.rm = T), color = "blue")
+plot2 <- ggplot() + geom_density(data = kraft_at_central,aes(x= price), color = "red", fill ="red", alpha = .1) + geom_density(data = kraft_at_jewel,aes(x= price), color = "blue", fill ="blue", alpha = .2) + ggtitle("Distribution of prices - Kraft") + geom_vline(xintercept = mean(kraft_at_central$price), color = "red") + geom_vline(xintercept = mean(kraft_at_jewel$price, na.rm = T), color = "blue")
+plot_grid(plot1, plot2)
+# t.test(hellman_at_central$price, hellman_at_jewel$price)
+# t.test(kraft_at_central$price, kraft_at_jewel$price)
+```
+
+
+3) The variation is higher on the Jewel level for both companies. The F-test proofs this statistically with very low p-values close to zero. The variation on Central level is lower, because the prices per unit are formed at a higher level of aggregation. Therefore this data is already averaged, which cancels out most of the variation observed on Jewel level. In consequence, on Jewel level the estimator should be more consistent due to higher variation of the independent variables. 
+
+
+```{r, echo=F}
+kable(matrix(c(var(hellman_at_central$price), var(hellman_at_jewel$price, na.rm = T), var(kraft_at_central$price), var(kraft_at_jewel$price, na.rm = T)),byrow = T , nrow = 2,ncol = 2, dimnames = list(c("Hellman", "Kraft"),c("Central", "Jewel"))), caption = "Variances of prices")
+# var.test(hellman_at_central$price, hellman_at_jewel$price)
+# var.test(kraft_at_central$price, kraft_at_jewel$price)
+```
+
+
+\pagebreak
+
+
+4) Both companies set their prices per unit beween 0.90\$ and 1.20\$ in most of the weeks. Kraft has in the end of the samples a harsh price decrease for single weeks, which is not true for Hellman. Changes of prices seem to be higher on Jewel level for both companies (see question 3). Sales are far higher on the Central level but seem to be more volatile as well. On Jewel level units sold seem to be similar for both companies. On Central level Hellman has far more sales in units. 
+
+
+```{r, echo=FALSE, out.width = '50%'}
+par(mfrow =c(1,2))
+plot(hellman_at_jewel$date2, hellman_at_jewel$price, col = "blue", type = "l", xlab = "Time", ylab = "Price", main="Hellman prices", ylim = c(.5,1.2))
+lines(hellman_at_jewel$date2, hellman_at_central$price,col="red", type = "l")
+legend(x="bottomleft", legend = c("Jewel", "Central"), col = c("blue", "red"),lwd=2)
+plot(kraft_at_jewel$date2, kraft_at_jewel$price, col = "blue", type = "l", xlab = "Time", ylab = "Price", main="Kraft prices", ylim = c(.5,1.2))
+lines(kraft_at_jewel$date2, kraft_at_central$price,col="red", type = "l")
+legend(x="bottomleft", legend = c("Jewel", "Central"), col = c("blue", "red"),lwd=2)
+plot(hellman_at_jewel$date2, hellman_at_jewel$sales_u/1000, col = "blue", type = "l", xlab = "Time", ylab = "Units in 1000", main="Hellman units sold", ylim = c(0,600))
+lines(hellman_at_jewel$date2, hellman_at_central$sales_u/1000,col="red", type = "l")
+legend(x="topleft", legend = c("Jewel", "Central"), col = c("blue", "red"),lwd=2)
+plot(kraft_at_jewel$date2, kraft_at_jewel$sales_u/1000, col = "blue", type = "l", xlab = "Time", ylab = "Units in 1000", main="Kraft units sold", ylim = c(0,600))
+lines(kraft_at_jewel$date2, kraft_at_central$sales_u/1000,col="red", type = "l")
+legend(x="topleft", legend = c("Jewel", "Central"), col = c("blue", "red"),lwd=2)
+par(mfrow =c(1,1))
+```
+
+
+5) On  Jewel level it is easier to see the negatively sloped demand curve. This is also valid for  Kraft Central. For Hellman Central it is hard to figure out that there is a negative demand curve, because the data is highly distributed. A higher elasticity is assumed on Hellman Jewel and Kraft Jewel.  
+
+
+```{r , echo=FALSE, out.width = '50%'}
+par(mfrow =c(1,2))
+plot(x=hellman_at_jewel$sales_u/1000, y=hellman_at_jewel$price, pch =4, col="blue", ylab = "Price per Unit", xlab = "Units Sold in 1000", main = "Hellman Jewel")
+plot(x=hellman_at_central$sales_u/1000,  y=hellman_at_central$price,pch =4, col="red", ylab = "Price per Unit", xlab = "Units Sold in 1000", main = "Hellman Central")
+plot(x=kraft_at_jewel$sales_u/1000,  y=kraft_at_jewel$price, pch =4, col="blue", ylab = "Price per Unit", xlab = "Units Sold in 1000", main = "Kraft Jewel")
+plot(x=kraft_at_central$sales_u/1000,  y=kraft_at_central$price,pch =4, col="red", ylab = "Price per Unit", xlab = "Units Sold in 1000", main = "Kraft Central")
+par(mfrow =c(1,1))
+```
+
+\pagebreak
+
+## Demand Estimation
+
+1) Multiplicative demand models for the Jewel level: 
+
+
+```{r , echo=FALSE, warning=F}
+hl_model <- lm(ln_sales_u ~ ln_price, data = hellman_at_jewel)
+pander(hl_model, caption= "\\label{tab:MyLabel}Demand Model for the Jewel level (Hellman)\n")
+kl_model <- lm(ln_sales_u ~ ln_price, data = kraft_at_jewel)
+pander(kl_model, caption= "\\label{tab:MyLabel}Demand Model for the Jewel level (Kraft)\n")
+```
+
+
+2) Multiplicative demand models for the Central level: 
+
+
+```{r , echo=FALSE, warning=F, out.width = '70%'}
+hl_model <- lm(ln_sales_u ~ ln_price, data = hellman_at_central)
+pander(hl_model, caption= "\\label{tab:MyLabel}Demand Model for the Central level (Hellman)\n")
+kl_model <- lm(ln_sales_u ~ ln_price, data = kraft_at_central)
+pander(kl_model, caption= "\\label{tab:MyLabel}Demand Model for the Central level (Kraft)\n")
+```
+
+
+3) Elasticity is higher on the Jewel level, as already assumed in the last question from the previous section. This might be due to the following reasons: 
+    - The Jewel level is a city with a dense population and a lot of different stores which may offer more substitutes resulting in a higher degree of price sensitivity among customers
+    - The Central level is a broader area, where people might also have lower income with a higher price sensitivity than in the urban area
+    - People on the Central level may be more brand loyal
+
+
+4) A 10% increase in prices results in a reduction of demand for each company on the Jewel level. The results are the quantities after the price increase in percent compared to the initial quantities: 
+    $$ \Delta Q_{Hellman} = \frac{Q_1}{Q_0} = \frac{Q_1 (P_1 = P_0 * 1.1)}{Q_0 (P_0)} = \frac{AP_1^{- \eta}}{AP_0^{- \eta}} = \frac{A (P_0 *1.1)^{- \eta}}{AP_0^{- \eta}} = 1.1^{- \eta} = 1.1^{- 4.584}= 0.646$$
+    $$ \Delta Q_{Kraft} = \frac{Q_1}{Q_0} = \frac{Q_1 (P_1 = P_0 * 1.1)}{Q_0 (P_0)} = \frac{AP_1^{- \eta}}{AP_0^{- \eta}} = \frac{A (P_0 *1.1)^{- \eta}}{AP_0^{- \eta}} = 1.1^{- \eta} = 1.1^{- 4.167}= 0.672$$
+
+
+\pagebreak
+
+5) Demand model for Kraft and Hellman's on Jewel level allowing for cross-price effects: 
+
+
+```{r , echo=FALSE, warning=F}
+h2_model <- lm(hellman_at_jewel$ln_sales_u ~ hellman_at_jewel$ln_price + kraft_at_jewel$ln_price)
+pander(h2_model, caption= "\\label{tab:MyLabel}Demand Model with cross-price effects (Hellman)\n")
+k2_model <- lm(kraft_at_jewel$ln_sales_u ~ kraft_at_jewel$ln_price + hellman_at_jewel$ln_price )
+pander(k2_model, caption= "\\label{tab:MyLabel}Demand Model with cross-price effects (Kraft)\n")
+```
+
+
+6) The negative effect of the own prices gets somewhat stronger and for both companies the effect of the competitor's price is positve. Meaning that a increase of the competitor's price rises the own demand. The effect and the absolute value of the estimator is stronger for Kraft and even insignificant for Hellman. So we assume that Hellman is not as vulnarable as Kraft to competitor's prices. 
+
+
+7) The colleague talks about a potential omitted variable bias. This is only present if the omitted variable is correlated to the independent variables, which should not be the case for the mentioned variables pointed out by the colleague.
+
+
+8) In case of a Hellman's price cut of 10%, Kraft has to adapt prices in the following way to maintain the same output quantity. Kraft should increase prices by around 4% to keep demand stable. 
+
+
+$$ \Delta Q_{Kraft} = \frac{Q_1}{Q_0} = (1 - r_{Kraft})^{- \eta} (1 - r_{Hellmann})^{\hat{\beta}} = 1 $$
+$$ (1 - r_{Kraft})^{- \eta} (1 - 0.1)^{\hat{\beta}} = 1 $$
+$$ (1 - r_{Kraft})^{- \eta} = \frac{1}{(1 - 0.1)^{\hat{\beta}}} $$
+$$ r_{Kraft} = 1- (\frac{1}{(1 - 0.1)^{\hat{\beta}}})^{\frac{1}{- \eta}}  =  0.04344678 $$
+
+
+```{r, include=F}
+# $$ \ln{(1 - r_{Kraft})^{- \eta}} = \ln{\frac{1}{(1 - 0.1)^{\hat{\beta}}}} $$
+# $$ {- \eta} \ln{(1 - r_{Kraft})} = \ln{\frac{1}{(1 - 0.1)^{\hat{\beta}}}} $$
+# $$  e^{\ln{(1 - r_{Kraft})}} = e^{\frac{\ln{\frac{1}{(1 - 0.1)^{\hat{\beta}}}}}{- \eta}} $$ 
+# $$ r_{Kraft} = 1 - e^{\frac{\ln{\frac{1}{(1 - 0.1)^{1.871}}}}{- 4.439}} =  0.04344678  $$
+
+
+# Could also work with the -eta sqrt or 1/-eta on the other side as the power
+1-exp( log(1/(0.9^k2_model$coefficients[3]))/ k2_model$coefficients[2])
+1-(1/(0.9^k2_model$coefficients[3]))^(1/ k2_model$coefficients[2])
+
+#pander(stargazer(hl_model, kl_model, title="Results", align=TRUE))
+# pander(mtable("Hellman Local"= hl_model, "Kraft Local"= kl_model, summary.stats = c('R-squared','N')))
+```
+
